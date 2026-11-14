@@ -51,6 +51,7 @@ h1 span{color:var(--pink)}
 .lock{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
 .lockbar{height:10px;background:#dfe3ee;border-radius:5px;overflow:hidden}
 .lockbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--good));transition:width .08s linear}
+.pips{display:flex;gap:6px}.pips b{width:22px;height:10px;border-radius:5px;background:#dfe3ee;display:block}.pips b.on{background:var(--good)}
 .alt{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
 button{font-family:var(--body);font-size:15px;font-weight:600;cursor:pointer;border-radius:6px;border:0;padding:10px 16px}
 button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
@@ -99,7 +100,7 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   <header>
     <div class="eyebrow">&gt; Keytos Hack · Mini-challenge 02</div>
     <h1>BEST CAPTCHA <span>EVER</span></h1>
-    <p class="lede">No questions, no picking squares. One gesture: find the patch of static that rains downward and keep your cursor on it for two seconds. It only exists between frames, so a screenshot shows nothing, and it moves faster than any agent can think.</p>
+    <p class="lede">No questions, no picking squares. Three human checks at once: your eyes find a patch that only exists in motion, your hand tracks it, and your timing clicks it on the beat. It only exists between frames, so a screenshot shows nothing, and it moves faster than any agent can think.</p>
   </header>
 
   <div class="stage">
@@ -108,12 +109,13 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
       <h2>Prove you're human</h2>
 
       <div id="trackMode" class="rhythm">
-        <p class="q">Somewhere in the static, a patch is <strong>falling like rain</strong>. Keep your cursor on it until the bar fills.</p>
+        <p class="q">Somewhere in the static, a patch is <strong>falling like rain</strong>. Keep your cursor on it. Every time it <strong>gusts</strong> (with a thump if your sound is on), <strong>click it</strong>.</p>
         <div class="fieldwrap" id="fieldwrap">
           <canvas id="field" role="img"></canvas>
           <div class="overlay" id="overlay">Move your cursor or finger here to start</div>
         </div>
         <div class="lock"><span>LOCK</span><div class="lockbar"><i id="lockFill"></i></div><span id="lockPct">0%</span></div>
+        <div class="lock"><span>GUSTS</span><div class="pips" id="pips"><b></b><b></b><b></b></div><span id="beatMsg">click on 3</span></div>
       </div>
 
       <div id="rhythmMode" class="rhythm" hidden>
@@ -149,7 +151,7 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   <section class="layers">
     <div class="layer"><h3>Invisible in space</h3><p>Every frame is uniform static. The target is only the region where dots move together, so it exists across frames, never in one. Motion-coded CAPTCHAs held up against GPT and Gemini in recent work (<a href="https://arxiv.org/abs/2502.05461" target="_blank" rel="noopener">IllusionCAPTCHA, WWW 2025</a> uses illusions for the same human-easy, AI-hard gap).</p></div>
     <div class="layer"><h3>Closed loop, human speed</h3><p>The patch wanders and turns every second. Screenshot-act agents take seconds per step. On interactive, multi-step CAPTCHAs the best agent solved 40% vs 93% for people (<a href="https://arxiv.org/abs/2505.24878" target="_blank" rel="noopener">Open CaptchaWorld, NeurIPS 2025</a>).</p></div>
-    <div class="layer"><h3>Too perfect = bot</h3><p>People trail a moving target by roughly 100–300 ms and wobble. A script that reads the page state tracks with near-zero lag and a glassy path, so the reaction-lag check flags it even if it finds the target.</p></div>
+    <div class="layer"><h3>On the beat, imperfectly</h3><p>The patch gusts on a random tempo, a cue that is also motion-only. People click within tens of milliseconds with natural spread, and trail a moving target by 100–300 ms. A script that reads page state is too fast and too exact, and spam clicking gets flagged.</p></div>
     <div class="layer"><h3>Planted lies</h3><p>A hidden note tells agents to press a fake skip button, park at the center, or tap at 100 BPM. A honeypot field waits for form fillers. Obeying any of them is a confession.</p></div>
   </section>
 </div>
@@ -181,7 +183,8 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
       tgt: { x: 60 + Math.random() * (W - 120), y: 60 + Math.random() * (H - 120), th: Math.random() * Math.PI * 2, sp: 92, nextTurn: 0 },
       cur: null, lock: 0, samples: [],
       park: 0, sig: { skip: false, honey: false, park: false, untrusted: false, bpmDecoy: false, moves: 0 },
-      verdict: null, analysis: null, rhythm: null
+      verdict: null, analysis: null, rhythm: null,
+      beat: { ibi: 650 + Math.random() * 250, next: 0, times: [], clicks: [], gustUntil: 0 }
     };
   }
 
@@ -202,14 +205,14 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   }
 
   // ---------- Noise field: coherent rain inside the patch, random walk outside ----------
-  function drawField(dt) {
-    const s = 1.7 * dt * 60, tx = G.tgt.x, ty = G.tgt.y, R2 = R * R;
+  function drawField(dt, gust) {
+    const s = 1.7 * dt * 60, sIn = s * (gust ? 3.4 : 1), tx = G.tgt.x, ty = G.tgt.y, R2 = R * R;
     fctx.fillStyle = '#0d1220'; fctx.fillRect(0, 0, W, H);
     fctx.fillStyle = '#dfe6ff';
     for (let i = 0; i < N; i++) {
       const o = i * 4; let x = D[o], y = D[o + 1];
       const dx = x - tx, dy = y - ty;
-      if (dx * dx + dy * dy < R2) { y += s; }
+      if (dx * dx + dy * dy < R2) { y += sIn; }
       else { x += Math.cos(D[o + 3]) * s; y += Math.sin(D[o + 3]) * s; }
       D[o] = x; D[o + 1] = y; D[o + 2] -= dt * 60;
       if (D[o + 2] <= 0 || x < 0 || x >= W || y < 0 || y >= H) spawn(i);
@@ -221,7 +224,9 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
     const dt = Math.min(0.05, (now - G.lastT) / 1000); G.lastT = now;
     if (G.mode === 'track' && !G.finished) {
       if (G.started) stepTarget(dt, now);
-      drawField(dt);
+      const B = G.beat;
+      if (G.started && now >= B.next) { B.times.push(B.next); B.gustUntil = B.next + 150; B.next += B.ibi; thump(); }
+      drawField(dt, now < B.gustUntil);
       if (G.started) {
         const c = G.cur, t = G.tgt;
         const d = c ? Math.hypot(c.x - t.x, c.y - t.y) : 1e9;
@@ -237,7 +242,11 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
         $('lockFill').style.width = (G.lock * 100).toFixed(0) + '%';
         $('lockPct').textContent = (G.lock * 100).toFixed(0) + '%';
         $('timer').textContent = ((now - G.started) / 1000).toFixed(1) + 's';
-        if (G.lock >= 1) finishTrack(now);
+        const bs = beatStats(now);
+        document.querySelectorAll('#pips b').forEach((b, i) => b.classList.toggle('on', i < bs.hits));
+        $('beatMsg').textContent = bs.hits >= 3 ? 'done' : `${bs.hits} / 3`;
+        if (G.lock >= 1 && bs.hits >= 3) finishTrack(now);
+        else if (G.lock >= 1) $('lockPct').textContent = 'HOLD';
       }
     }
     requestAnimationFrame(frame);
@@ -249,12 +258,43 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
   function begin() {
-    if (!G.started) { G.started = performance.now(); G.tgt.nextTurn = G.started + 900; $('overlay').hidden = true; }
+    if (!G.started) { G.started = performance.now(); G.tgt.nextTurn = G.started + 900; G.beat.next = G.started + 1100; $('overlay').hidden = true; }
   }
   field.addEventListener('pointermove', e => { if (e.isTrusted) G.sig.moves++; begin(); G.cur = toField(e); });
-  field.addEventListener('pointerdown', e => { begin(); G.cur = toField(e); });
+  field.addEventListener('pointerdown', e => {
+    begin(); G.cur = toField(e); unlockAudio();
+    if (G.finished || G.mode !== 'track') return;
+    G.beat.clicks.push({ t: performance.now(), on: Math.hypot(G.cur.x - G.tgt.x, G.cur.y - G.tgt.y) < LOCK_R * 1.15 });
+  });
   field.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') G.cur = null; });
   field.addEventListener('pointerup', e => { if (e.pointerType === 'touch') G.cur = null; });
+
+  // ---------- Gust beat: audio-visual timing ----------
+  let audio = null;
+  function unlockAudio() {
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state !== 'running') audio.resume(); } catch (e) {}
+  }
+  function thump() {
+    if (!audio || audio.state !== 'running') return;
+    const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.12);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.18);
+  }
+  // A hit = the only on-target click within ±220 ms of a gust. Spam clicking is flagged, not rewarded.
+  function beatStats(now) {
+    const B = G.beat, all = B.times.concat(now != null && B.next - now < 220 ? [B.next] : []);
+    const asyn = [];
+    for (const bt of all) {
+      const near = B.clicks.filter(c => Math.abs(c.t - bt) <= 220);
+      if (near.length === 1 && near[0].on) asyn.push(near[0].t - bt);
+    }
+    const beatsSoFar = Math.max(1, B.times.length);
+    const spam = B.clicks.length > beatsSoFar * 1.6 + 3;
+    const mean = asyn.reduce((a, b) => a + b, 0) / (asyn.length || 1);
+    const sd = Math.sqrt(asyn.reduce((a, b) => a + (b - mean) ** 2, 0) / (asyn.length || 1));
+    return { hits: spam ? 0 : asyn.length, spam, mean, sd, clicks: B.clicks.length, beats: B.times.length };
+  }
 
   // ---------- Analysis: reaction lag via velocity cross-correlation ----------
   function analyze() {
@@ -302,9 +342,11 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
     G.finished = now; $('fieldwrap').classList.remove('onit');
     G.analysis = analyze();
     const a = G.analysis, t = traps(), why = [...t];
+    const bs = beatStats(now); G.analysis = Object.assign(a || {}, { beat: bs });
     if (a && a.lag < 30 && a.corr > 0.85) why.push(`Tracked with ${a.lag} ms lag. People need 100+ ms`);
+    if (bs.hits >= 3 && bs.sd < 6) why.push(`Clicked the gusts with machine precision (spread ${bs.sd.toFixed(1)} ms)`);
     showVerdict(why.length ? 'bot' : 'human', why,
-      a ? `Locked in ${((now - G.started) / 1000).toFixed(1)} s. Reaction lag ${a.lag} ms, ${Math.round(a.onTarget * 100)}% on target.` : '');
+      a ? `Done in ${((now - G.started) / 1000).toFixed(1)} s. Tracking lag ${a.lag} ms · beat timing ${Math.round(bs.mean)} ± ${Math.round(bs.sd)} ms.` : '');
     drawTrace();
   }
 
@@ -319,7 +361,6 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   }
 
   // ---------- Rhythm fallback: sensorimotor synchronization ----------
-  let audio = null;
   function startRhythm() {
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); }
     catch (e) { $('rhythmMsg').textContent = 'Sound is blocked here. Use the tracking check.'; return; }
@@ -407,6 +448,9 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
       rows.push(['Lock progress', G.lock > 0.05 ? 'ok' : (elapsed > TIMEOUT ? 'hit' : ''), live || G.finished ? Math.round(G.lock * 100) + '%' : 'waiting']);
       if (elapsed > TIMEOUT && !G.finished) rows.push(['No lock after 30 s', 'hit', 'NO HUMAN YET']);
       rows.push(['Reaction lag', a ? (a.lag < 30 ? 'hit' : 'ok') : '', a ? a.lag + ' ms' : 'after lock']);
+      const bs = G.started ? beatStats(G.finished ? null : performance.now()) : null;
+      rows.push(['Gust clicks on target', bs ? (bs.spam ? 'hit' : bs.hits >= 3 ? 'ok' : '') : '', bs ? (bs.spam ? `SPAM ${bs.clicks} clicks` : `${bs.hits}/3`) : 'waiting']);
+      rows.push(['Beat timing spread', bs && bs.hits >= 2 ? (bs.sd < 6 ? "hit" : "ok") : '', bs && bs.hits >= 2 ? `±${Math.round(bs.sd)} ms` : 'after 2 hits']);
       rows.push(['Pointer wobble', a ? 'ok' : '', a ? a.jitter.toFixed(2) + ' px/frame' : 'after lock']);
     } else {
       rows.push(['Planted 100 BPM grid', G.sig.bpmDecoy ? 'hit' : 'ok', G.sig.bpmDecoy ? 'OBEYED' : 'ignored']);
@@ -420,7 +464,7 @@ button:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   function reset(mode) {
     G = newRound(); G.mode = mode || 'track';
     $('result').hidden = true; $('again').hidden = true; $('honey').value = '';
-    $('overlay').hidden = false; $('lockFill').style.width = '0'; $('lockPct').textContent = '0%'; $('timer').textContent = '0.0s';
+    $('overlay').hidden = false; $('lockFill').style.width = '0'; $('lockPct').textContent = '0%'; $('beatMsg').textContent = '0 / 3'; document.querySelectorAll('#pips b').forEach(b => b.classList.remove('on')); $('timer').textContent = '0.0s';
     $('trackMode').hidden = G.mode !== 'track'; $('rhythmMode').hidden = G.mode !== 'rhythm';
     $('switchMode').textContent = G.mode === 'track' ? "Can't track? Use the rhythm check" : 'Back to the tracking check';
     $('pad').textContent = 'START BEAT'; $('rhythmMsg').textContent = '8 beats. Join in whenever you catch it.';
